@@ -41,23 +41,35 @@ async def incoming_call(
         db.refresh(business)
 
     # Create call session
-    session = CallSession(call_sid=CallSid, business_id=business.id, state={}, stage="start")
-    db.add(session)
-    db.commit()
-    db.refresh(session)
+    # See if session exists
+    session = db.query(CallSession).filter(CallSession.call_sid == CallSid).first()
+
+    if not session:
+    # First time this call is seen
+        session = CallSession(
+            call_sid=CallSid,
+            business_id=business.id,
+            state={},   # important!
+            stage="start"
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+
 
     # Greet and ask first open question via LLM
     # For first turn, we can seed the LLM with empty state and generic text
     result = await get_next_turn(session.state or {}, "The call has just started.")
 
-    session.stage = result.get("stage", "ask_name")
-    session.state = result.get("state", {})
+    session.state = result["state"]
+    session.stage = result["stage"]
     db.commit()
+
 
     vr = VoiceResponse()
     gather = Gather(
         input="speech",
-        action="/voice/gather",
+        action="https://unslicked-brittni-wiggly.ngrok-free.dev/voice/gather",
         method="POST",
         timeout=5
     )
@@ -72,6 +84,7 @@ async def incoming_call(
 
 @router.post("/gather", response_class=PlainTextResponse)
 async def handle_gather(
+    request: Request,
     db: Session = Depends(get_db),
     CallSid: str = Form(...),
     SpeechResult: str = Form(default=""),
@@ -128,7 +141,7 @@ async def handle_gather(
     else:
         gather = Gather(
             input="speech",
-            action="/voice/gather",
+            action="https://unslicked-brittni-wiggly.ngrok-free.dev/voice/gather",
             method="POST",
             timeout=5
         )
